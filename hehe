@@ -1,0 +1,90 @@
+# -*-coding:utf-8-*-
+import re
+from configparser import ConfigParser
+import requests
+from lxml import etree
+import logging
+import time
+from fake_useragent import UserAgent
+import sys
+
+
+ua = UserAgent()
+def get_html(url):
+	#logging.debug(url)
+	time.sleep(6)
+	headers={"User-Agent":ua.random}#随机UA
+	try:
+		rsp = requests.get(url,headers=headers,timeout=(5,10))
+		rsp.encoding='utf-8'
+		html=etree.HTML(rsp.text)
+		return html
+	except requests.exceptions.RequestException as e:
+		logging.debug(e)
+	
+def main():
+	#logging config
+	sys.stdout.reconfigure(encoding='utf-8')
+	logFilename=time.strftime("%Y%m%d_%H_%M_%S", time.localtime()) + '.log'
+	logging.basicConfig(
+        level=logging.DEBUG,  # 定义输出到文件的log级别，大于此级别的都被输出
+        format='%(asctime)s  %(filename)s : %(levelname)s  %(message)s',  # 定义输出log的格式
+        datefmt='%Y-%m-%d %A %H:%M:%S',  # 时间
+        filename=logFilename,  # log文件名
+        filemode='w')  # 写入模式“w”或“a”
+	# Define a Handler and set a format which output to console
+	console = logging.StreamHandler()  # 定义console handler
+	console.setLevel(logging.DEBUG)  # 定义该handler级别
+	formatter = logging.Formatter('%(asctime)s  %(filename)s : %(levelname)s  %(message)s')  # 定义该handler格式
+	console.setFormatter(formatter)
+	# Create an instance
+	logging.getLogger().addHandler(console)  # 实例化添加handler
+	
+	
+	#init var
+	start_url='https://www.wnacg.org/albums-index-page-1-cate-9.html'
+	base_url = 'https://www.wnacg.org/albums-index-page-{}-cate-9.html'
+	download_base_url = 'https://www.wnacg.org/download-index-aid-{}.html'
+	url_current=start_url
+	cfg=ConfigParser()
+	
+	while True:
+		logging.debug('****************Current url=%s'%url_current)
+		html_index=get_html(url_current)
+		books_urls=html_index.xpath('//div[@class="title"]/a/@href')#.extract() books url in current page,total 12
+		if books_urls:
+				for book_url in books_urls:
+					book_id=re.findall("\d+",book_url)[0]#get book id 
+					download_url=download_base_url.format(book_id)#get download url from book id
+					html_down=get_html(download_url)#get download page context
+					namelist=html_down.xpath('//p[@class="download_filename"]/text()')#[0]#.extract()[0]#get book name 
+					if namelist:
+						book_name=namelist[0]
+					else:
+						book_name=book_id
+					zip_urls=html_down.xpath('//a[@class="down_btn"]/@href')#.extract()#get book.zip url
+					
+					logging.debug('id:%s'%book_id)
+					logging.debug('name:%s'%book_name)
+					logging.debug('urls:%s'%zip_urls)
+					#write to init
+					cfg.read('wnacg_ret.ini',encoding='utf-8')
+					cfg.add_section(book_id)
+					cfg.set(book_id,'name',book_name)
+					if len(zip_urls)==2:
+						cfg.set(book_id,'urla',zip_urls[0])
+						cfg.set(book_id,'urlb',zip_urls[1])
+					else:
+						cfg.set(book_id,'urla',zip_urls[0])
+					with open('wnacg_ret.ini','w+',encoding='utf-8') as f:
+						cfg.write(f)
+		else:
+			logging.debug('can not get books urls')
+		next_url=html_index.xpath('//span[@class="next"]/a/@href')[0]#.extract()[0]
+		if next_url:
+			url_current='https://www.wnacg.org/' + next_url
+		else:
+			logging.debug('there is no next url,end...')
+			
+if __name__ == '__main__':
+	main()
